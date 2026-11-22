@@ -6,8 +6,8 @@ index a1b04bb..52c7cba 100644
  #include "cute/util/sycl_vec.hpp"
  #include "fmha_fusion.hpp"
  
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+#include "ikp_xe/trace.hpp"
++#ifdef CUTLASS_BMG_FMHA_IKT
++#include "ikt/trace.hpp"
 +#endif
 +
  namespace cutlass::fmha {
@@ -17,24 +17,24 @@ index a1b04bb..52c7cba 100644
    using ElementScaleP = cute::conditional_t<BlockScale, ElementScaleV, DefScaleType>;
  
    // User-facing arguments
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+  enum FmhaIkpRegion : uint16_t {
-+    kIkpTile = 0,
-+    kIkpVprefetch,
-+    kIkpKload,
-+    kIkpKreorder,
-+    kIkpQk,
-+    kIkpKprefetch,
-+    kIkpSoftmax,
-+    kIkpPpack,
-+    kIkpVload,
-+    kIkpVreorder,
-+    kIkpRescale,
-+    kIkpPv,
-+    kIkpRegionCount
++#ifdef CUTLASS_BMG_FMHA_IKT
++  enum FmhaIktRegion : uint16_t {
++    kIktTile = 0,
++    kIktVprefetch,
++    kIktKload,
++    kIktKreorder,
++    kIktQk,
++    kIktKprefetch,
++    kIktSoftmax,
++    kIktPpack,
++    kIktVload,
++    kIktVreorder,
++    kIktRescale,
++    kIktPv,
++    kIktRegionCount
 +  };
-+  static constexpr uint32_t ikp_cap = 4096;
-+  static constexpr std::array<char const*, 12> ikp_region_names{{
++  static constexpr uint32_t ikt_cap = 4096;
++  static constexpr std::array<char const*, 12> ikt_region_names{{
 +      "tile", "v_prefetch", "k_load", "k_reorder", "qk", "k_prefetch",
 +      "softmax", "p_pack", "v_load", "v_reorder", "out_rescale", "pv"}};
 +#endif
@@ -44,10 +44,10 @@ index a1b04bb..52c7cba 100644
      int const* ptr_page_table = nullptr;
      int page_size = 0;
      int const* num_pages_per_seq = nullptr;
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+    ikp_xe::GlobalBuffer ikp{};
-+    int ikp_trace_tiles = 0;
-+    unsigned ikp_trace_subgroups = 0;
++#ifdef CUTLASS_BMG_FMHA_IKT
++    ikt::GlobalBuffer ikt{};
++    int ikt_trace_tiles = 0;
++    unsigned ikt_trace_subgroups = 0;
 +#endif
    };
  
@@ -58,10 +58,10 @@ index a1b04bb..52c7cba 100644
      ElementS val = args.scale * static_cast<ElementS>(kLog2e);
 -    return Params{val, args.ptr_page_table, args.page_size, args.num_pages_per_seq};
 +    Params params{val, args.ptr_page_table, args.page_size, args.num_pages_per_seq};
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+    params.ikp = args.ikp;
-+    params.ikp_trace_tiles = args.ikp_trace_tiles;
-+    params.ikp_trace_subgroups = args.ikp_trace_subgroups;
++#ifdef CUTLASS_BMG_FMHA_IKT
++    params.ikt = args.ikt;
++    params.ikt_trace_tiles = args.ikt_trace_tiles;
++    params.ikt_trace_subgroups = args.ikt_trace_subgroups;
 +#endif
 +    return params;
    }
@@ -71,12 +71,12 @@ index a1b04bb..52c7cba 100644
      }
      constexpr int kAtomsPerD = decltype(get<2>(TileShapeQK{}))::value
                               / decltype(get<2>(typename TiledMMAQK::AtomShape_MNK{}))::value;
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+    auto ikp_sg = sycl::ext::oneapi::this_work_item::get_sub_group();
-+    ikp_xe::SubgroupContext<ikp_cap> ikp_ctx;
-+    if (ikp_sg.leader()) {
-+      ikp_ctx.init(params.ikp, get_nd_item<3>().get_group_linear_id(),
-+                   ikp_sg.get_group_linear_id());
++#ifdef CUTLASS_BMG_FMHA_IKT
++    auto ikt_sg = sycl::ext::oneapi::this_work_item::get_sub_group();
++    ikt::SubgroupContext<ikt_cap> ikt_ctx;
++    if (ikt_sg.leader()) {
++      ikt_ctx.init(params.ikt, get_nd_item<3>().get_group_linear_id(),
++                   ikt_sg.get_group_linear_id());
 +    }
 +#endif
      /* Main loop body */
@@ -86,12 +86,12 @@ index a1b04bb..52c7cba 100644
        barrier_arrive(ScopeWorkgroup);
  #endif
        constexpr bool is_cache = decltype(cached_k)::value;
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      const bool ikp_trace =
-+          params.ikp.events && K < params.ikp_trace_tiles &&
-+          ikp_sg.get_group_linear_id() < params.ikp_trace_subgroups &&
++#ifdef CUTLASS_BMG_FMHA_IKT
++      const bool ikt_trace =
++          params.ikt.events && K < params.ikt_trace_tiles &&
++          ikt_sg.get_group_linear_id() < params.ikt_trace_subgroups &&
 +          get_nd_item<3>().get_group_linear_id() == 0;
-+      IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpTile, ikp_trace);
++      IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktTile, ikt_trace);
 +#endif
  
        int k_idx;
@@ -100,21 +100,21 @@ index a1b04bb..52c7cba 100644
        }
        // V prefetch for next iteration (non-cache only; cache prefetch lives below).
        if constexpr (!is_cache) {
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpVprefetch, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktVprefetch, ikt_trace);
 +#endif
          prefetch_with_payloads(prefetch_v, prepared_pv, shape(pVgV(_,_,_,0)));
          update_payloads(prepared_pv, kv_stride);
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpVprefetch, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktVprefetch, ikt_trace);
 +#endif
        }
        /* GEMM 1: S = K * Q */
        CUTLASS_PRAGMA_UNROLL
  
        for (int D = 0; D < DTiles; D++) {
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpKload, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktKload, ikt_trace);
 +#endif
          if constexpr (is_cache) {
            copy(copy_k_cur, tKgK_cur(_,_,_,k_idx,D), tKrK);
@@ -122,15 +122,15 @@ index a1b04bb..52c7cba 100644
            copy_with_multi_payloads(copy_k, prepared_k[D], tKrK);
            update_payloads(prepared_k[D], kv_stride);
          }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpKload, ikp_trace);
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpKreorder, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktKload, ikt_trace);
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktKreorder, ikt_trace);
 +#endif
  
          reorder(tKrK, tSrK);
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpKreorder, ikp_trace);
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpQk, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktKreorder, ikt_trace);
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktQk, ikt_trace);
 +#endif
  
          if constexpr (BlockScale) {
@@ -139,14 +139,14 @@ index a1b04bb..52c7cba 100644
              cute::gemm(mma_qk, tSrQ_d, tSrK, tSrS);
            }
          }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpQk, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktQk, ikt_trace);
 +#endif
        }
  
        /* K prefetch for next iteration */
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpKprefetch, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktKprefetch, ikt_trace);
 +#endif
        if constexpr (is_cache) {
          CUTLASS_PRAGMA_UNROLL
@@ -155,8 +155,8 @@ index a1b04bb..52c7cba 100644
          prefetch_with_payloads(prefetch_k, prepared_pk, shape(pKgK(_,_,_,0)));
          update_payloads(prepared_pk, kv_stride);
        }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpKprefetch, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktKprefetch, ikt_trace);
 +#endif
        // Prefetch V scale
        if constexpr (BlockScale) {
@@ -165,12 +165,12 @@ index a1b04bb..52c7cba 100644
        if constexpr (PerTensorScale) {
          qk_scale = params.scale * ElementS(scale_q) * ElementS(scale_k);
        }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpSoftmax, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktSoftmax, ikt_trace);
 +#endif
        auto [rescale, tS_partial_sum] = softmax(tSrS, tA_max, tA_sum, qk_scale);
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpSoftmax, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktSoftmax, ikt_trace);
 +#endif
        auto sg = sycl::ext::oneapi::this_work_item::get_sub_group();
        constexpr int kSumSize = decltype(tA_sum.size())::value;
@@ -178,8 +178,8 @@ index a1b04bb..52c7cba 100644
        constexpr int kSumPerVT = kSumDivVT ? (kSumSize / VTiles) : 0;
        /* Apply softmax and scaling (tA rescaling fused into GEMM2 VTile loop) */
        using ElementP = typename TiledMMAPV::ValTypeA;
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpPpack, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktPpack, ikt_trace);
 +#endif
        if constexpr (std::is_same_v<ElementP, bfloat16_t>) {
          static_assert(decltype(tArP.size())::value % 2 == 0,
@@ -188,16 +188,16 @@ index a1b04bb..52c7cba 100644
        else {
          reorder(tSrS, tArP);
        }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpPpack, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktPpack, ikt_trace);
 +#endif
  
        /* GEMM 2: A += P * V, split in v dimension.
          tArA rescaling is fused to per-VTile */
        CUTLASS_PRAGMA_UNROLL
        for (int VV = 0; VV < VTiles; VV++) {
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpVload, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktVload, ikt_trace);
 +#endif
          if constexpr (is_cache) {
            copy(copy_v_cur, tVgV_cur(_,_,_,VV,k_idx), tVrV);
@@ -205,14 +205,14 @@ index a1b04bb..52c7cba 100644
            copy_with_multi_payloads(copy_v, prepared_v[VV], tVrV);
            update_payloads(prepared_v[VV], kv_stride);
          }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpVload, ikp_trace);
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpVreorder, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktVload, ikt_trace);
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktVreorder, ikt_trace);
 +#endif
          reorder(tVrV, tArV);
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpVreorder, ikp_trace);
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpRescale, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktVreorder, ikt_trace);
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktRescale, ikt_trace);
 +#endif
  
          CUTLASS_PRAGMA_UNROLL
@@ -221,9 +221,9 @@ index a1b04bb..52c7cba 100644
              tA_sum(i) = tA_sum(i) * group_broadcast(sg, rescale(0), i) + tS_partial_sum(i);
            }
          }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpRescale, ikp_trace);
-+        IKP_XE_BEGIN_IF(ikp_ctx, params.ikp, ikp_sg, kIkpPv, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktRescale, ikt_trace);
++        IKT_BEGIN_IF(ikt_ctx, params.ikt, ikt_sg, kIktPv, ikt_trace);
 +#endif
          if constexpr (BlockScale && !FP4Input) {
            const int v_coord = get<1>(blk_qv) * VTiles * BLK_V + VV * BLK_V + (subgroup_id % ATOM_V) * SG_V;
@@ -232,8 +232,8 @@ index a1b04bb..52c7cba 100644
            }
            cute::gemm(mma_pv, tArP, tArV, tArA(_,_,_,VV));
          }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+        IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpPv, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++        IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktPv, ikt_trace);
 +#endif
        }
  
@@ -243,8 +243,8 @@ index a1b04bb..52c7cba 100644
  #if not defined(CUTLASS_TEST_FOR_CRI)
        barrier_wait(ScopeWorkgroup);
 +#endif
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+      IKP_XE_END_IF(ikp_ctx, params.ikp, ikp_sg, kIkpTile, ikp_trace);
++#ifdef CUTLASS_BMG_FMHA_IKT
++      IKT_END_IF(ikt_ctx, params.ikt, ikt_sg, kIktTile, ikt_trace);
  #endif
      };
  
@@ -252,9 +252,9 @@ index a1b04bb..52c7cba 100644
                      prefetch_v, tKgK,
                      tVgV, pVgV);
      }
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+    if (ikp_sg.leader()) {
-+      ikp_ctx.flush(params.ikp);
++#ifdef CUTLASS_BMG_FMHA_IKT
++    if (ikt_sg.leader()) {
++      ikt_ctx.flush(params.ikt);
 +    }
 +#endif
    }
@@ -285,7 +285,7 @@ index 7cf2ac8..44647ae 100644
  
  
  set(CUTLASS_APPLICATIONS_DIR ${CUTLASS_DIR}/applications)
-+option(CUTLASS_ENABLE_BMG_FMHA_IKP_XE "Enable IKP-XE region profiling in the BF16 hdim128 prefill example" OFF)
++option(CUTLASS_ENABLE_BMG_FMHA_IKT "Enable IKT region profiling in the BF16 hdim128 prefill example" OFF)
  # TODO For Multitarget, these input types may be wrong for non-cri hardware.
  # Skip non-supported tests at runtime, keep this flag as well to not increase compile
  # time for single target build.
@@ -293,8 +293,8 @@ index 7cf2ac8..44647ae 100644
      endif()
  
      target_compile_definitions(06_xe_fmha_fwd_prefill_${INPUT_TYPE}_hdim${HEAD_DIM} PRIVATE HEAD_DIM=${HEAD_DIM} PREFILL SHOW_DIFF=1 INPUT_TYPE=${INPUT_TYPE} ${INPUT_MACRO})
-+    if(CUTLASS_ENABLE_BMG_FMHA_IKP_XE AND INPUT_TYPE STREQUAL "bfloat16_t" AND HEAD_DIM EQUAL 128)
-+      target_compile_definitions(06_xe_fmha_fwd_prefill_${INPUT_TYPE}_hdim${HEAD_DIM} PRIVATE CUTLASS_BMG_FMHA_IKP_XE)
++    if(CUTLASS_ENABLE_BMG_FMHA_IKT AND INPUT_TYPE STREQUAL "bfloat16_t" AND HEAD_DIM EQUAL 128)
++      target_compile_definitions(06_xe_fmha_fwd_prefill_${INPUT_TYPE}_hdim${HEAD_DIM} PRIVATE CUTLASS_BMG_FMHA_IKT)
 +    endif()
      target_compile_definitions(06_xe_fmha_fwd_decode_${INPUT_TYPE}_hdim${HEAD_DIM} PRIVATE HEAD_DIM=${HEAD_DIM} DECODE SHOW_DIFF=1 INPUT_TYPE=${INPUT_TYPE} ${INPUT_MACRO})
  
@@ -307,8 +307,8 @@ index e12cc0e..f157822 100644
  
  #include <sycl/ext/intel/experimental/grf_size_properties.hpp>
  
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+#include "ikp_xe/trace.hpp"
++#ifdef CUTLASS_BMG_FMHA_IKT
++#include "ikt/trace.hpp"
 +#endif
 +
  using namespace cute;
@@ -318,7 +318,7 @@ index e12cc0e..f157822 100644
  
    int batch, num_heads_q, num_heads_kv, seq_len_qo, seq_len_kv, seq_len_kv_cache, page_size, head_size_qk, head_size_vo, iterations, warmup, verify, seq_chunk_len;
    float softmax_scale;
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
++#ifdef CUTLASS_BMG_FMHA_IKT
 +  std::string trace_file;
 +  int trace_tiles = 32;
 +  int trace_subgroups = 16;
@@ -330,7 +330,7 @@ index e12cc0e..f157822 100644
      }
  
      softmax_scale = 1 / sqrt(static_cast<float>(head_size_qk));
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
++#ifdef CUTLASS_BMG_FMHA_IKT
 +    cmd.get_cmd_line_argument("trace", trace_file, std::string{});
 +    cmd.get_cmd_line_argument("trace_tiles", trace_tiles, 32);
 +    cmd.get_cmd_line_argument("trace_subgroups", trace_subgroups, 16);
@@ -349,8 +349,8 @@ index e12cc0e..f157822 100644
          << "  --verify=<int>              Specify whether to verify.\n"
          << "  --seq_chunk_len=<int>       KV chunk length for sequence-parallel (LSE) runs.\n"
          << "                              <=0 means a single full chunk.\n\n";
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
-+    out << "  --trace=<path>              Write an IKP-XE .ikptrace file from one extra dispatch.\n"
++#ifdef CUTLASS_BMG_FMHA_IKT
++    out << "  --trace=<path>              Write an IKT .ikttrace file from one extra dispatch.\n"
 +        << "  --trace_tiles=<int>         Number of initial KV tiles to trace (default: 32).\n"
 +        << "  --trace_subgroups=<int>     Number of subgroups to trace in workgroup 0 (default: 16).\n";
 +#endif
@@ -361,12 +361,12 @@ index e12cc0e..f157822 100644
        printf("\nPerformance:   %4.3f  GB/s,    %4.3f  TFlop/s,   %6.4f  ms\n\n", gbps, tflops, cute_time * 1000);
      }
  
-+#ifdef CUTLASS_BMG_FMHA_IKP_XE
++#ifdef CUTLASS_BMG_FMHA_IKT
 +    if (!options.trace_file.empty()) {
 +      auto queue = compat::get_default_queue();
 +      auto device = queue.get_device();
 +      if (!device.has(sycl::aspect::ext_oneapi_clock_sub_group)) {
-+        std::cerr << "IKP-XE tracing requires a device with a subgroup clock.\n";
++        std::cerr << "IKT tracing requires a device with a subgroup clock.\n";
 +        return cutlass::Status::kErrorNotSupported;
 +      }
 +      constexpr int sg_per_wg = CollectiveMainloop::SGPerWG::value;
@@ -376,19 +376,19 @@ index e12cc0e..f157822 100644
 +        std::cerr << "--trace_subgroups cannot exceed " << sg_per_wg << " for this kernel.\n";
 +        return cutlass::Status::kErrorInvalidProblem;
 +      }
-+      ikp_xe::HostSession session(queue);
-+      session.init(CollectiveMainloop::ikp_cap, 1, sg_per_wg, 0, 1);
++      ikt::HostSession session(queue);
++      session.init(CollectiveMainloop::ikt_cap, 1, sg_per_wg, 0, 1);
 +      std::vector<std::string> region_names;
-+      for (auto name : CollectiveMainloop::ikp_region_names) region_names.emplace_back(name);
++      for (auto name : CollectiveMainloop::ikt_region_names) region_names.emplace_back(name);
 +      session.set_region_names(std::move(region_names));
 +      session.reset();
 +      session.calibrate();
 +
-+      auto ikp_params = params;
-+      ikp_params.mainloop.ikp = session.global_buffer();
-+      ikp_params.mainloop.ikp_trace_tiles = tiles;
-+      ikp_params.mainloop.ikp_trace_subgroups = options.trace_subgroups;
-+      run(ikp_params);
++      auto ikt_params = params;
++      ikt_params.mainloop.ikt = session.global_buffer();
++      ikt_params.mainloop.ikt_trace_tiles = tiles;
++      ikt_params.mainloop.ikt_trace_subgroups = options.trace_subgroups;
++      run(ikt_params);
 +      queue.wait_and_throw();
 +      if (!session.write_raw(options.trace_file)) {
 +        return cutlass::Status::kErrorInternal;

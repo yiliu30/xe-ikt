@@ -1,11 +1,11 @@
 build*/
-ikp_xe_regions
-*.ikptrace
+ikt_regions
+*.ikttrace
 *.perfetto.json
 *_summary.json
 __pycache__/
 *.pyc
 *.pyo
-!examples/fmha/*.ikptrace
+!examples/fmha/*.ikttrace
 !examples/fmha/*.perfetto.json
 !examples/fmha/*_summary.json

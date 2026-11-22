@@ -1,5 +1,5 @@
 {
-  "trace": "fmha_bf16_75600_ikp_xe.perfetto.json",
+  "trace": "fmha_bf16_75600_ikt.perfetto.json",
   "clock": "per-subgroup relative, not synchronized",
   "ns_per_tick": 0.35716619521164544,
   "cap": 4096,

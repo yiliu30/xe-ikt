@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert an IKP-XE raw trace to Perfetto and summary JSON."""
+"""Convert an IKT raw trace to Perfetto and summary JSON."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-MAGIC = b"IKPXE02\0"
+MAGIC = b"IKT02\0\0\0"
 EVENT = struct.Struct("<QHHHH")  # ts, id, type, wg, sg_info
 BEGIN, END, MARK = 0, 1, 2
 TYPE_PRIORITY = {BEGIN: 0, MARK: 1, END: 2}
@@ -182,7 +182,7 @@ def convert(input_path: Path, output_path: Path, summary_path: Path | None):
                 events.append(
                     {
                         "ph": "X",
-                        "cat": "IKP-XE",
+                        "cat": "IKT",
                         "name": args["region"],
                         "pid": wg,
                         "tid": sg + 2,
@@ -197,7 +197,7 @@ def convert(input_path: Path, output_path: Path, summary_path: Path | None):
                     {
                         "ph": "i",
                         "s": "t",
-                        "cat": "IKP-XE",
+                        "cat": "IKT",
                         "name": args["region"],
                         "pid": wg,
                         "tid": sg + 2,

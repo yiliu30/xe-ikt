@@ -12,9 +12,9 @@ an Intel Arc Pro B70:
 
 Files:
 
-- `fmha_bf16_75600_ikp_xe.ikptrace` - raw IKP-XE trace
-- `fmha_bf16_75600_ikp_xe.perfetto.json` - Perfetto/Chrome Trace
-- `fmha_bf16_75600_ikp_xe_summary.json` - per-region and per-track statistics
+- `fmha_bf16_75600_ikt.ikttrace` - raw IKT trace
+- `fmha_bf16_75600_ikt.perfetto.json` - Perfetto/Chrome Trace
+- `fmha_bf16_75600_ikt_summary.json` - per-region and per-track statistics
 
 Open the Perfetto JSON in <https://ui.perfetto.dev>.
 
@@ -40,6 +40,6 @@ Share of tile wall time:
 Instrumented child regions cover about 72% of tile time. The remaining ~28% is
 barrier/synchronization and uninstrumented work.
 
-The IKP-XE-enabled build with recording off measured 66.6 TFLOP/s (527 ms) on
+The IKT-enabled build with recording off measured 66.6 TFLOP/s (527 ms) on
 the B70. The same 128x64 schedule without instrumentation measures 90.4 TFLOP/s
-(388 ms), so use the non-IKP build for performance measurements.
+(388 ms), so use the non-IKT build for performance measurements.

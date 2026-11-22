@@ -1,4 +1,4 @@
-# Intel Xe Intra-Kernel Profiler
+# Intel Kernel Tracing (IKT)
 
 A small, kernel-agnostic region profiler for Intel Xe/SYCL kernels, modeled on
 [yao-jz/intra-kernel-profiler](https://github.com/yao-jz/intra-kernel-profiler).
@@ -6,20 +6,20 @@ A small, kernel-agnostic region profiler for Intel Xe/SYCL kernels, modeled on
 Instrument a kernel with named regions:
 
 ```text
-IKP_XE_BEGIN(load) ... IKP_XE_END(load)
-IKP_XE_BEGIN(compute) ... IKP_XE_END(compute)
-IKP_XE_BEGIN(store) ... IKP_XE_END(store)
+IKT_BEGIN(load) ... IKT_END(load)
+IKT_BEGIN(compute) ... IKT_END(compute)
+IKT_BEGIN(store) ... IKT_END(store)
 ```
 
 Each subgroup records timestamped events into its own circular buffer. The host
-dumps a compact binary trace, and `scripts/ikp_xe_to_perfetto.py` produces:
+dumps a compact binary trace, and `scripts/ikt_to_perfetto.py` produces:
 
 - Perfetto / Chrome Trace JSON
 - Aggregate summary JSON with per-region and per-track statistics
 
 ## CUDA IKP to Xe mapping
 
-| CUDA IKP | Intel Xe / SYCL |
+| CUDA IKT | Intel Xe / SYCL |
 |---|---|
 | warp | subgroup |
 | `threadIdx.x >> 5` | `sg.get_group_linear_id()` |
@@ -29,16 +29,16 @@ dumps a compact binary trace, and `scripts/ikp_xe_to_perfetto.py` produces:
 | `%globaltimer` | `clock<clock_scope::sub_group>()` |
 | `st.global.cs.v4.u32` | 128-bit `sycl::vec<uint32_t,4>` store |
 | `cudaMalloc` / `cudaMemcpy` | `sycl::malloc_device` / `queue.memcpy` |
-| CUDA host session | `ikp_xe::HostSession` |
+| CUDA host session | `ikt::HostSession` |
 
 ## Usage
 
 ```cpp
-#include "ikp_xe/trace.hpp"
+#include "ikt/trace.hpp"
 
 enum Region : uint16_t { kLoad, kCompute, kStore };
 
-ikp_xe::HostSession session(queue);
+ikt::HostSession session(queue);
 session.init(/*cap=*/256, /*grid=*/4, /*sgs_per_wg=*/16,
              /*wg_base=*/0, /*wg_count=*/4);
 session.set_region_names({"load", "compute", "store"});
@@ -49,23 +49,23 @@ const auto gbuf = session.global_buffer();
 queue.parallel_for(sycl::nd_range<1>{grid * threads, threads},
     [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
       auto sg = item.get_sub_group();
-      IKP_XE_CTX_TYPE(256) ctx;
-      IKP_XE_CTX_INIT(ctx, gbuf, item, sg);
+      IKT_CTX_TYPE(256) ctx;
+      IKT_CTX_INIT(ctx, gbuf, item, sg);
 
-      IKP_XE_BEGIN(ctx, gbuf, sg, kLoad);
+      IKT_BEGIN(ctx, gbuf, sg, kLoad);
       // work
-      IKP_XE_END(ctx, gbuf, sg, kLoad);
+      IKT_END(ctx, gbuf, sg, kLoad);
 
-      IKP_XE_FLUSH(ctx, gbuf);
+      IKT_FLUSH(ctx, gbuf);
     }).wait_and_throw();
 
-session.write_raw("trace.ikptrace");
+session.write_raw("trace.ikttrace");
 ```
 
 Convert:
 
 ```bash
-python3 scripts/ikp_xe_to_perfetto.py trace.ikptrace \
+python3 scripts/ikt_to_perfetto.py trace.ikttrace \
   -o trace.perfetto.json --summary trace_summary.json
 ```
 
@@ -76,11 +76,11 @@ Open `trace.perfetto.json` in <https://ui.perfetto.dev>.
 ```bash
 source /opt/intel/oneapi/compiler/2026.1/env/vars.sh
 ./build.sh
-./ikp_xe_regions
-python3 scripts/ikp_xe_to_perfetto.py ikp_xe_regions.ikptrace
+./ikt_regions
+python3 scripts/ikt_to_perfetto.py ikt_regions.ikttrace
 ```
 
-`IKP_XE_DEVICE=bmg-g31` selects the AOT device. CMake is also supported:
+`IKT_DEVICE=bmg-g31` selects the AOT device. CMake is also supported:
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -89,17 +89,17 @@ cmake -S . -B build -G Ninja \
 cmake --build build -j
 ```
 
-Set `-DIKP_XE_TRACE_ENABLED=0` to compile out the profiling macros.
+Set `-DIKT_TRACE_ENABLED=0` to compile out the profiling macros.
 
 ## API
 
 Device macros:
 
-- `IKP_XE_CTX_TYPE(cap)`
-- `IKP_XE_CTX_INIT(ctx, gbuf, item, sg)`
-- `IKP_XE_BEGIN/END/MARK(ctx, gbuf, sg, id)`
-- `IKP_XE_BEGIN_IF/END_IF(ctx, gbuf, sg, id, condition)`
-- `IKP_XE_FLUSH(ctx, gbuf)`
+- `IKT_CTX_TYPE(cap)`
+- `IKT_CTX_INIT(ctx, gbuf, item, sg)`
+- `IKT_BEGIN/END/MARK(ctx, gbuf, sg, id)`
+- `IKT_BEGIN_IF/END_IF(ctx, gbuf, sg, id, condition)`
+- `IKT_FLUSH(ctx, gbuf)`
 
 Host:
 
@@ -111,14 +111,14 @@ Host:
 - `HostSession::write_raw(path)`
 
 Use `wg_base` / `wg_count` to record a bounded subset of workgroups. Use
-`IKP_XE_BEGIN_IF` / `IKP_XE_END_IF` to sample selected loop iterations.
+`IKT_BEGIN_IF` / `IKT_END_IF` to sample selected loop iterations.
 
 ## Trace format
 
-The raw `.ikptrace` file contains:
+The raw `.ikttrace` file contains:
 
 ```text
-magic "IKPXE02\0", version, cap, grid,
+magic "IKT02\0\0\0", version, cap, grid,
 workgroup base/count, subgroups per workgroup,
 region names, per-slot valid counts,
 16-byte events: {ts, region, type, wg, sg_info}
@@ -167,4 +167,4 @@ The trace backend is the first layer. The same region IDs can be used for:
 - GTPin instruction counts / basic-block attribution
 - VTune hardware counters and stall reasons
 - Level Zero / system timeline alignment
-- An IKP-style HTML explorer
+- An IKT-style HTML explorer

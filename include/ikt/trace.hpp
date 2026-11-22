@@ -7,7 +7,7 @@
 // records, keeping the hot path small.
 //
 // Host side: allocate USM buffers, launch the instrumented kernel, and dump a
-// compact binary trace. scripts/ikp_xe_to_perfetto.py converts that binary to
+// compact binary trace. scripts/ikt_to_perfetto.py converts that binary to
 // Perfetto/Chrome Trace JSON and a summary JSON.
 
 #include <sycl/sycl.hpp>
@@ -25,11 +25,11 @@
 #include <utility>
 #include <vector>
 
-#ifndef IKP_XE_TRACE_ENABLED
-#define IKP_XE_TRACE_ENABLED 1
+#ifndef IKT_TRACE_ENABLED
+#define IKT_TRACE_ENABLED 1
 #endif
 
-namespace ikp_xe {
+namespace ikt {
 
 inline constexpr uint16_t kBegin = 0;
 inline constexpr uint16_t kEnd = 1;
@@ -141,60 +141,60 @@ struct SubgroupContext {
   }
 };
 
-#if IKP_XE_TRACE_ENABLED
-#define IKP_XE_CTX_TYPE(cap) ::ikp_xe::SubgroupContext<(cap)>
-#define IKP_XE_CTX_INIT(ctx, gbuf, item, sg)                                      \
+#if IKT_TRACE_ENABLED
+#define IKT_CTX_TYPE(cap) ::ikt::SubgroupContext<(cap)>
+#define IKT_CTX_INIT(ctx, gbuf, item, sg)                                      \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
       (ctx).init((gbuf), uint32_t((item).get_group_linear_id()),                    \
                  uint32_t((sg).get_group_linear_id()));                             \
     }                                                                              \
   } while (0)
-#define IKP_XE_BEGIN(ctx, gbuf, sg, id)                                            \
+#define IKT_BEGIN(ctx, gbuf, sg, id)                                            \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
-      (ctx).record((gbuf), uint16_t(id), ::ikp_xe::kBegin);                         \
+      (ctx).record((gbuf), uint16_t(id), ::ikt::kBegin);                         \
     }                                                                              \
   } while (0)
-#define IKP_XE_END(ctx, gbuf, sg, id)                                              \
+#define IKT_END(ctx, gbuf, sg, id)                                              \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
-      (ctx).record((gbuf), uint16_t(id), ::ikp_xe::kEnd);                           \
+      (ctx).record((gbuf), uint16_t(id), ::ikt::kEnd);                           \
     }                                                                              \
   } while (0)
-#define IKP_XE_MARK(ctx, gbuf, sg, id)                                             \
+#define IKT_MARK(ctx, gbuf, sg, id)                                             \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
-      (ctx).record((gbuf), uint16_t(id), ::ikp_xe::kMark);                          \
+      (ctx).record((gbuf), uint16_t(id), ::ikt::kMark);                          \
     }                                                                              \
   } while (0)
-#define IKP_XE_BEGIN_IF(ctx, gbuf, sg, id, cond)                                    \
+#define IKT_BEGIN_IF(ctx, gbuf, sg, id, cond)                                    \
   do {                                                                             \
     if ((sg).leader() && (cond)) {                                                 \
-      (ctx).record((gbuf), uint16_t(id), ::ikp_xe::kBegin);                         \
+      (ctx).record((gbuf), uint16_t(id), ::ikt::kBegin);                         \
     }                                                                              \
   } while (0)
-#define IKP_XE_END_IF(ctx, gbuf, sg, id, cond)                                      \
+#define IKT_END_IF(ctx, gbuf, sg, id, cond)                                      \
   do {                                                                             \
     if ((sg).leader() && (cond)) {                                                 \
-      (ctx).record((gbuf), uint16_t(id), ::ikp_xe::kEnd);                           \
+      (ctx).record((gbuf), uint16_t(id), ::ikt::kEnd);                           \
     }                                                                              \
   } while (0)
-#define IKP_XE_FLUSH(ctx, gbuf)                                                    \
+#define IKT_FLUSH(ctx, gbuf)                                                    \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
       (ctx).flush((gbuf));                                                         \
     }                                                                              \
   } while (0)
 #else
-#define IKP_XE_CTX_TYPE(cap) ::ikp_xe::SubgroupContext<(cap)>
-#define IKP_XE_CTX_INIT(ctx, gbuf, item, sg) do { (void)(ctx); } while (0)
-#define IKP_XE_BEGIN(ctx, gbuf, sg, id) do { (void)(ctx); } while (0)
-#define IKP_XE_END(ctx, gbuf, sg, id) do { (void)(ctx); } while (0)
-#define IKP_XE_MARK(ctx, gbuf, sg, id) do { (void)(ctx); } while (0)
-#define IKP_XE_BEGIN_IF(ctx, gbuf, sg, id, cond) do { (void)(ctx); } while (0)
-#define IKP_XE_END_IF(ctx, gbuf, sg, id, cond) do { (void)(ctx); } while (0)
-#define IKP_XE_FLUSH(ctx, gbuf) do { (void)(ctx); } while (0)
+#define IKT_CTX_TYPE(cap) ::ikt::SubgroupContext<(cap)>
+#define IKT_CTX_INIT(ctx, gbuf, item, sg) do { (void)(ctx); } while (0)
+#define IKT_BEGIN(ctx, gbuf, sg, id) do { (void)(ctx); } while (0)
+#define IKT_END(ctx, gbuf, sg, id) do { (void)(ctx); } while (0)
+#define IKT_MARK(ctx, gbuf, sg, id) do { (void)(ctx); } while (0)
+#define IKT_BEGIN_IF(ctx, gbuf, sg, id, cond) do { (void)(ctx); } while (0)
+#define IKT_END_IF(ctx, gbuf, sg, id, cond) do { (void)(ctx); } while (0)
+#define IKT_FLUSH(ctx, gbuf) do { (void)(ctx); } while (0)
 #endif
 
 namespace detail {
@@ -204,7 +204,7 @@ inline double calibrate_ns_per_tick(sycl::queue const& base_queue) {
                     sycl::property::queue::enable_profiling{});
   auto* ticks = sycl::malloc_device<uint64_t>(1, timer);
   if (!ticks) {
-    throw std::runtime_error("ikp_xe: failed to allocate calibration buffer");
+    throw std::runtime_error("ikt: failed to allocate calibration buffer");
   }
 
   auto sample = [&](uint64_t target) {
@@ -263,15 +263,15 @@ class HostSession {
             uint32_t wg_base = 0, uint32_t wg_count = 0xffffffffu) {
     destroy();
     if (cap == 0 || (cap & (cap - 1u)) != 0u) {
-      throw std::invalid_argument("ikp_xe: cap must be a power of two and > 0");
+      throw std::invalid_argument("ikt: cap must be a power of two and > 0");
     }
     if (grid_size == 0 || sgs_per_wg == 0 || wg_base >= grid_size) {
-      throw std::invalid_argument("ikp_xe: invalid grid_size, wg_base, or sgs_per_wg");
+      throw std::invalid_argument("ikt: invalid grid_size, wg_base, or sgs_per_wg");
     }
     wg_count = std::min(wg_count, grid_size - wg_base);
     if (!queue_.get_device().has(sycl::aspect::ext_oneapi_clock_sub_group)) {
       throw std::runtime_error(
-          "ikp_xe: device does not support ext_oneapi_clock_sub_group");
+          "ikt: device does not support ext_oneapi_clock_sub_group");
     }
     cap_ = cap;
     grid_ = grid_size;
@@ -284,7 +284,7 @@ class HostSession {
     d_counters_ = sycl::malloc_device<uint32_t>(slots, queue_);
     if (!d_events_ || !d_counters_) {
       destroy();
-      throw std::runtime_error("ikp_xe: USM allocation failed");
+      throw std::runtime_error("ikt: USM allocation failed");
     }
     reset();
   }
@@ -340,17 +340,17 @@ class HostSession {
       ns_per_tick = detail::calibrate_ns_per_tick(queue_);
     }
     if (!(ns_per_tick > 0.0)) {
-      std::fprintf(stderr, "ikp_xe: clock calibration failed\n");
+      std::fprintf(stderr, "ikt: clock calibration failed\n");
       return false;
     }
 
     std::ofstream out(path, std::ios::binary);
     if (!out) {
-      std::fprintf(stderr, "ikp_xe: cannot open %s\n", path.c_str());
+      std::fprintf(stderr, "ikt: cannot open %s\n", path.c_str());
       return false;
     }
 
-    const char magic[8] = {'I', 'K', 'P', 'X', 'E', '0', '2', '\0'};
+    const char magic[8] = {'I', 'K', 'T', '0', '2', '\0', '\0', '\0'};
     out.write(magic, sizeof(magic));
     const uint32_t version = 2;
     const uint32_t num_regions = uint32_t(region_names_.size());
@@ -410,4 +410,4 @@ class HostSession {
   std::vector<std::string> region_names_;
 };
 
-}  // namespace ikp_xe
+}  // namespace ikt
