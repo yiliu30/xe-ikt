@@ -141,49 +141,6 @@ region names, per-slot valid counts,
 [10:12] EU, [13:15] hardware thread
 ```
 
-## Source to ISA mapping
-
-IGC's final `.asm` listing contains `// File:` and `// Line N:` annotations.
-`scripts/ikt_source_asm.py` groups the following ISA instructions under each
-source line and emits a JSON map plus a self-contained Compiler Explorer-style
-two-pane HTML viewer.
-
-Build with line information and dump the IGC shader:
-
-```bash
-icpx -O2 -g -fsycl -fsycl-targets=spir64_gen \
-  -Xsycl-target-backend "-device bmg-g31" \
-  -Iinclude examples/regions.cpp -o ikt_regions
-
-mkdir -p /abs/ikt_dump
-IGC_ShaderDumpEnable=1 IGC_DumpToCustomDir=/abs/ikt_dump \
-NEO_CACHE_PERSISTENT=0 NEOReadDebugKeys=1 RebuildPrecompiledKernels=1 \
-./ikt_regions
-```
-
-Generate the map and HTML view:
-
-```bash
-python3 scripts/ikt_source_asm.py --dump-dir /abs/ikt_dump \
-  --path-map /work=. --source-root . \
-  -o source_asm.json --html source_asm.html
-```
-
-The viewer has selectable kernels/files, click-linked source and ISA lines,
-search, and an IKT-only filter. Source lines containing IKT markers are
-highlighted. See [`examples/source_asm/`](examples/source_asm/) for a generated
-example.
-
-Notes:
-
-- `-g` is required for source-line annotations.
-- The tool uses the final ISA listing (`.asm`), not the pre-RA `.isaasm`.
-- The `.elf` dump also contains DWARF `.debug_line`; that can be used later to
-  attach PC ranges and join dynamic GTPin/VTune counts. The current report is a
-  static source-to-ISA mapping.
-- When `--source-root` can resolve a file, the JSON contains every source line;
-  otherwise it contains only lines that IGC annotated with ISA.
-
 ## Limitations
 
 - **Xe exposes only subgroup-scope clocks on this stack.** Each subgroup track is
@@ -203,7 +160,7 @@ Notes:
 - [`examples/regions.cpp`](examples/regions.cpp) - standalone multi-region SYCL example
 - [`examples/fmha/`](examples/fmha/) - validated 75,600-token FMHA capture and Perfetto output
 - [`integrations/sycl-tla-fmha.patch`](integrations/sycl-tla-fmha.patch) - SYCL-TLA FMHA integration patch
-- [`examples/source_asm/`](examples/source_asm/) - generated source-to-ISA JSON/HTML report
+- [`examples/source_asm/`](examples/source_asm/) - source-to-ISA viewer (under development)
 
 ## Validation
 
