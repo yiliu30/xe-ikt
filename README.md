@@ -3,9 +3,14 @@
 A small, kernel-agnostic intra-kernel tracer for Intel Xe/SYCL kernels, modeled on
 [yao-jz/intra-kernel-profiler](https://github.com/yao-jz/intra-kernel-profiler).
 
-**Disclaimer:** This is an independent personal project, not an official Intel project. It is not affiliated with, sponsored by, or endorsed by Intel Corporation.
+> **Disclaimer:** This is an independent personal project, not an official Intel project. It is not affiliated with, sponsored by, or endorsed by Intel Corporation.
 
-Instrument a kernel with named regions:
+[CUDA IKP to Xe mapping](#cuda-ikp-to-xe-mapping) · [Usage](#usage) · [Build](#build) · [API](#api) · [Trace format](#trace-format)
+[Limitations](#limitations) · [Examples](#examples) · [Validation](#validation) · [Next steps](#next-steps)
+
+---
+
+**Instrument a kernel with named regions:**
 
 ```text
 IKT_BEGIN(load) ... IKT_END(load)
@@ -16,22 +21,22 @@ IKT_BEGIN(store) ... IKT_END(store)
 Each subgroup records timestamped events into its own circular buffer. The host
 dumps a compact binary trace, and `scripts/ikt_to_perfetto.py` produces:
 
-- Perfetto / Chrome Trace JSON
-- Aggregate summary JSON with per-region and per-track statistics
+- **Perfetto / Chrome Trace JSON**
+- **Aggregate summary JSON** with per-region and per-track statistics
 
 ## CUDA IKP to Xe mapping
 
-| CUDA IKT | Intel Xe / SYCL |
-|---|---|
-| warp | subgroup |
-| `threadIdx.x >> 5` | `sg.get_group_linear_id()` |
-| lane 0 | `sg.leader()` |
-| `blockIdx.x` | `item.get_group_linear_id()` |
-| `%smid` | Xe2 `SR0.0` slice/subslice/EU/thread decode |
-| `%globaltimer` | `clock<clock_scope::sub_group>()` |
-| `st.global.cs.v4.u32` | 128-bit `sycl::vec<uint32_t,4>` store |
-| `cudaMalloc` / `cudaMemcpy` | `sycl::malloc_device` / `queue.memcpy` |
-| CUDA host session | `ikt::HostSession` |
+| CUDA IKT                    | Intel Xe / SYCL                             |
+| --------------------------- | ------------------------------------------- |
+| warp                        | subgroup                                    |
+| `threadIdx.x >> 5`          | `sg.get_group_linear_id()`                  |
+| lane 0                      | `sg.leader()`                               |
+| `blockIdx.x`                | `item.get_group_linear_id()`                |
+| `%smid`                     | Xe2 `SR0.0` slice/subslice/EU/thread decode |
+| `%globaltimer`              | `clock<clock_scope::sub_group>()`           |
+| `st.global.cs.v4.u32`       | 128-bit `sycl::vec<uint32_t,4>` store       |
+| `cudaMalloc` / `cudaMemcpy` | `sycl::malloc_device` / `queue.memcpy`      |
+| CUDA host session           | `ikt::HostSession`                          |
 
 ## Usage
 
@@ -64,7 +69,7 @@ queue.parallel_for(sycl::nd_range<1>{grid * threads, threads},
 session.write_raw("trace.ikttrace");
 ```
 
-Convert:
+### Convert:
 
 ```bash
 python3 scripts/ikt_to_perfetto.py trace.ikttrace \
@@ -95,7 +100,7 @@ Set `-DIKT_TRACE_ENABLED=0` to compile out the profiling macros.
 
 ## API
 
-Device macros:
+### Device macros:
 
 - `IKT_CTX_TYPE(cap)`
 - `IKT_CTX_INIT(ctx, gbuf, item, sg)`
@@ -103,7 +108,7 @@ Device macros:
 - `IKT_BEGIN_IF/END_IF(ctx, gbuf, sg, id, condition)`
 - `IKT_FLUSH(ctx, gbuf)`
 
-Host:
+### Host:
 
 - `HostSession::init(cap, grid, sgs_per_wg, wg_base, wg_count)`
 - `HostSession::set_region_names(...)`
@@ -135,32 +140,32 @@ region names, per-slot valid counts,
 
 ## Limitations
 
-- Xe exposes only subgroup-scope clocks on this stack. Each subgroup track is
+- **Xe exposes only subgroup-scope clocks on this stack.** Each subgroup track is
   relative to its own first event; do not compare apparent timestamps across
   tracks. Region durations and per-track statistics are valid.
-- The calibration is a clock-rate estimate. It is warmed and sampled for
+- **The calibration is a clock-rate estimate.** It is warmed and sampled for
   stability, but absolute nanosecond values are approximate.
-- The ring buffer is circular: if a subgroup records more than `cap` events,
+- **The ring buffer is circular:** if a subgroup records more than `cap` events,
   only the last `cap` events are retained.
-- The raw binary dump copies `cap * wg_count * sgs_per_wg` events on the host.
+- **The raw binary dump** copies `cap * wg_count * sgs_per_wg` events on the host.
   Bound `wg_count` and `cap` for large kernels.
-- Xe2 placement decoding uses the BMG SR0.0 layout; other architectures may
+- **Xe2 placement decoding** uses the BMG SR0.0 layout; other architectures may
   need a different decoder.
 
 ## Examples
 
-- `examples/regions.cpp` - standalone multi-region SYCL example
-- `examples/fmha/` - validated 75,600-token FMHA capture and Perfetto output
-- `integrations/sycl-tla-fmha.patch` - SYCL-TLA FMHA integration patch
+- [`examples/regions.cpp`](examples/regions.cpp) - standalone multi-region SYCL example
+- [`examples/fmha/`](examples/fmha/) - validated 75,600-token FMHA capture and Perfetto output
+- [`integrations/sycl-tla-fmha.patch`](integrations/sycl-tla-fmha.patch) - SYCL-TLA FMHA integration patch
 
 ## Validation
 
 The included example was run on an Intel Arc Pro B70 (BMG-G31):
 
-- 4 workgroups x 16 subgroups = 64 tracks
-- 3 regions: load, compute, store
-- 1,536 matched spans, 0 unmatched begin/end events
-- Calibration stable at ~0.357 ns/tick across repeated runs
+- **4 workgroups x 16 subgroups = 64 tracks**
+- **3 regions:** load, compute, store
+- **1,536 matched spans, 0 unmatched begin/end events**
+- **Calibration stable at ~0.357 ns/tick** across repeated runs
 
 ## Next steps
 
