@@ -3,8 +3,6 @@
 A small, kernel-agnostic intra-kernel tracer for Intel Xe/SYCL kernels, modeled on
 [yao-jz/intra-kernel-profiler](https://github.com/yao-jz/intra-kernel-profiler).
 
-> **Disclaimer:** This is an independent personal project, not an official Intel project. It is not affiliated with, sponsored by, or endorsed by Intel Corporation.
-
 [CUDA IKP to Xe mapping](#cuda-ikp-to-xe-mapping) · [Usage](#usage) · [Build](#build) · [API](#api) · [Trace format](#trace-format)
 [Limitations](#limitations) · [Examples](#examples) · [Validation](#validation) · [Next steps](#next-steps)
 
@@ -183,3 +181,5 @@ The trace backend is the first layer. The same region IDs can be used for:
 - VTune hardware counters and stall reasons
 - Level Zero / system timeline alignment
 - An IKT-style HTML explorer
+
+> **Disclaimer:** This is an independent personal project, not an official Intel project. It is not affiliated with, sponsored by, or endorsed by Intel Corporation.
