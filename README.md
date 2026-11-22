@@ -24,6 +24,8 @@ dumps a compact binary trace, and `scripts/ikt_to_perfetto.py` produces:
 - **Perfetto / Chrome Trace JSON**
 - **Aggregate summary JSON** with per-region and per-track statistics
 
+**[Open real FMHA trace in Perfetto ↗](https://ui.perfetto.dev/#!/?url=https://raw.githubusercontent.com/yiliu30/xe-ikt/main/examples/fmha/fmha_bf16_75600_ikt.perfetto.json)** — BF16, 75,600 tokens, Intel Arc Pro B70. No local setup required.
+
 ## CUDA IKP to Xe mapping
 
 | CUDA IKT                    | Intel Xe / SYCL                             |
