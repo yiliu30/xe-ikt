@@ -3,6 +3,8 @@
 A small, kernel-agnostic region profiler for Intel Xe/SYCL kernels, modeled on
 [yao-jz/intra-kernel-profiler](https://github.com/yao-jz/intra-kernel-profiler).
 
+**Disclaimer:** This is an independent personal project, not an official Intel project. It is not affiliated with, sponsored by, or endorsed by Intel Corporation.
+
 Instrument a kernel with named regions:
 
 ```text
