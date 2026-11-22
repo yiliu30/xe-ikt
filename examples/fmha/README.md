@@ -18,6 +18,10 @@ Files:
 
 Open the Perfetto JSON in <https://ui.perfetto.dev>.
 
+<p align="center">
+  <img src="ikt-fmha.png" alt="IKT FMHA Perfetto trace on Intel Arc Pro B70" width="900">
+</p>
+
 ## Selected Results
 
 Mean tile duration: 5.245 us; p95: 5.604 us.

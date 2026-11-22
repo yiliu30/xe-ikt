@@ -26,9 +26,15 @@ dumps a compact binary trace, and `scripts/ikt_to_perfetto.py` produces:
 
 **[Open real FMHA trace in Perfetto ↗](https://ui.perfetto.dev/#!/?url=https://raw.githubusercontent.com/yiliu30/xe-ikt/main/examples/fmha/fmha_bf16_75600_ikt.perfetto.json)** — BF16, 75,600 tokens, Intel Arc Pro B70. No local setup required.
 
+<p align="center">
+  <img src="examples/fmha/ikt-fmha.png" alt="IKT FMHA Perfetto trace on Intel Arc Pro B70" width="900">
+</p>
+
+<p align="center"><em>IKT FMHA timeline in Perfetto: 16 subgroup tracks with 32 KV tiles per subgroup on an Intel Arc Pro B70.</em></p>
+
 ## CUDA IKP to Xe mapping
 
-| CUDA IKT                    | Intel Xe / SYCL                             |
+| CUDA IKP                    | Intel Xe / SYCL                             |
 | --------------------------- | ------------------------------------------- |
 | warp                        | subgroup                                    |
 | `threadIdx.x >> 5`          | `sg.get_group_linear_id()`                  |
