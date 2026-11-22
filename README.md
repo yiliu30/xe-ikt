@@ -3,9 +3,6 @@
 A small, kernel-agnostic intra-kernel tracer for Intel Xe/SYCL kernels, modeled on
 [yao-jz/intra-kernel-profiler](https://github.com/yao-jz/intra-kernel-profiler).
 
-[CUDA IKP to Xe mapping](#cuda-ikp-to-xe-mapping) · [Usage](#usage) · [Build](#build) · [API](#api) · [Trace format](#trace-format) · [Source to ISA mapping](#source-to-isa-mapping)
-[Limitations](#limitations) · [Examples](#examples) · [Validation](#validation) · [Next steps](#next-steps)
-
 ---
 
 **Instrument a kernel with named regions:**
