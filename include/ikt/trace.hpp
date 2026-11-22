@@ -1,6 +1,6 @@
 #pragma once
 
-// Intra-kernel region profiler for Intel Xe / SYCL.
+// Intra Kernel Tracer (IKT) for Intel Xe / SYCL.
 //
 // Device side: each subgroup (the Xe analogue of a CUDA warp) records named
 // begin/end/mark events into its own circular buffer. Only the subgroup leader
