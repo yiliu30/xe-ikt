@@ -148,7 +148,8 @@ region names, per-slot valid counts,
 
 IGC's final `.asm` listing contains `// File:` and `// Line N:` annotations.
 `scripts/ikt_source_asm.py` groups the following ISA instructions under each
-source line and emits a JSON map plus a self-contained HTML report.
+source line and emits a JSON map plus a self-contained Compiler Explorer-style
+two-pane HTML viewer.
 
 Build with line information and dump the IGC shader:
 
@@ -171,8 +172,10 @@ python3 scripts/ikt_source_asm.py --dump-dir /abs/ikt_dump \
   -o source_asm.json --html source_asm.html
 ```
 
-The report highlights source lines containing IKT markers. See
-[`examples/source_asm/`](examples/source_asm/) for a generated example.
+The viewer has selectable kernels/files, click-linked source and ISA lines,
+search, and an IKT-only filter. Source lines containing IKT markers are
+highlighted. See [`examples/source_asm/`](examples/source_asm/) for a generated
+example.
 
 Notes:
 
@@ -181,6 +184,8 @@ Notes:
 - The `.elf` dump also contains DWARF `.debug_line`; that can be used later to
   attach PC ranges and join dynamic GTPin/VTune counts. The current report is a
   static source-to-ISA mapping.
+- When `--source-root` can resolve a file, the JSON contains every source line;
+  otherwise it contains only lines that IGC annotated with ISA.
 
 ## Limitations
 

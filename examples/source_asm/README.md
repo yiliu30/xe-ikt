@@ -22,7 +22,13 @@ Files:
 - `ikt_regions_source_asm.json` - source line / ISA instruction map
 - `ikt_regions_source_asm.html` - self-contained report with source and ISA columns
 
-The report contains 4 kernels, 49 source-line groups, and 2,353 ISA
+The report contains 4 kernels, 47 mapped source-line groups, and 2,350 ISA
 instructions. Lines containing `IKT_` or `ikt::` are highlighted.
 
-Open `ikt_regions_source_asm.html` directly in a browser.
+Open `ikt_regions_source_asm.html` directly in a browser. It provides:
+
+- Compiler Explorer-style side-by-side source and ISA panes
+- Selectable kernel and source file
+- Click-linked source/ISA highlighting
+- Search across source and ISA
+- An IKT-only filter
