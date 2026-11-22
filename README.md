@@ -3,7 +3,7 @@
 A small, kernel-agnostic intra-kernel tracer for Intel Xe/SYCL kernels, modeled on
 [yao-jz/intra-kernel-profiler](https://github.com/yao-jz/intra-kernel-profiler).
 
-[CUDA IKP to Xe mapping](#cuda-ikp-to-xe-mapping) · [Usage](#usage) · [Build](#build) · [API](#api) · [Trace format](#trace-format)
+[CUDA IKP to Xe mapping](#cuda-ikp-to-xe-mapping) · [Usage](#usage) · [Build](#build) · [API](#api) · [Trace format](#trace-format) · [Source to ISA mapping](#source-to-isa-mapping)
 [Limitations](#limitations) · [Examples](#examples) · [Validation](#validation) · [Next steps](#next-steps)
 
 ---
@@ -144,6 +144,44 @@ region names, per-slot valid counts,
 [10:12] EU, [13:15] hardware thread
 ```
 
+## Source to ISA mapping
+
+IGC's final `.asm` listing contains `// File:` and `// Line N:` annotations.
+`scripts/ikt_source_asm.py` groups the following ISA instructions under each
+source line and emits a JSON map plus a self-contained HTML report.
+
+Build with line information and dump the IGC shader:
+
+```bash
+icpx -O2 -g -fsycl -fsycl-targets=spir64_gen \
+  -Xsycl-target-backend "-device bmg-g31" \
+  -Iinclude examples/regions.cpp -o ikt_regions
+
+mkdir -p /abs/ikt_dump
+IGC_ShaderDumpEnable=1 IGC_DumpToCustomDir=/abs/ikt_dump \
+NEO_CACHE_PERSISTENT=0 NEOReadDebugKeys=1 RebuildPrecompiledKernels=1 \
+./ikt_regions
+```
+
+Generate the map and HTML view:
+
+```bash
+python3 scripts/ikt_source_asm.py --dump-dir /abs/ikt_dump \
+  --path-map /work=. --source-root . \
+  -o source_asm.json --html source_asm.html
+```
+
+The report highlights source lines containing IKT markers. See
+[`examples/source_asm/`](examples/source_asm/) for a generated example.
+
+Notes:
+
+- `-g` is required for source-line annotations.
+- The tool uses the final ISA listing (`.asm`), not the pre-RA `.isaasm`.
+- The `.elf` dump also contains DWARF `.debug_line`; that can be used later to
+  attach PC ranges and join dynamic GTPin/VTune counts. The current report is a
+  static source-to-ISA mapping.
+
 ## Limitations
 
 - **Xe exposes only subgroup-scope clocks on this stack.** Each subgroup track is
@@ -163,6 +201,7 @@ region names, per-slot valid counts,
 - [`examples/regions.cpp`](examples/regions.cpp) - standalone multi-region SYCL example
 - [`examples/fmha/`](examples/fmha/) - validated 75,600-token FMHA capture and Perfetto output
 - [`integrations/sycl-tla-fmha.patch`](integrations/sycl-tla-fmha.patch) - SYCL-TLA FMHA integration patch
+- [`examples/source_asm/`](examples/source_asm/) - generated source-to-ISA JSON/HTML report
 
 ## Validation
 
