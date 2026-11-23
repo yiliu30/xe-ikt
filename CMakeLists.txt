@@ -12,3 +12,11 @@ target_compile_options(ikt_regions PRIVATE
 target_link_options(ikt_regions PRIVATE
   -fsycl -fsycl-targets=spir64_gen
   -Xsycl-target-backend "-device ${IKT_DEVICE}")
+
+add_executable(ikt_iket_api examples/iket_api.cpp)
+target_include_directories(ikt_iket_api PRIVATE include)
+target_compile_options(ikt_iket_api PRIVATE
+  -O3 -fsycl -fsycl-targets=spir64_gen)
+target_link_options(ikt_iket_api PRIVATE
+  -fsycl -fsycl-targets=spir64_gen
+  -Xsycl-target-backend "-device ${IKT_DEVICE}")

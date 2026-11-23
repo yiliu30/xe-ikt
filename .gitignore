@@ -1,7 +1,9 @@
 build*/
 ikt_regions
+ikt_iket_api
 *.ikttrace
 *.perfetto.json
+*.iket.json
 *_summary.json
 __pycache__/
 *.pyc
