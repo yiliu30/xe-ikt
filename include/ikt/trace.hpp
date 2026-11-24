@@ -98,19 +98,16 @@ inline uint64_t clock_ticks() {
 
 // Per-subgroup circular buffer recorder. CAP must be a power of two.
 // If a subgroup records more than CAP events, only the last CAP are retained.
-template <uint32_t Cap, uint32_t MaxDepth = 16>
+template <uint32_t Cap>
 struct SubgroupContext {
   static_assert((Cap & (Cap - 1u)) == 0u, "Cap must be a power of two");
   static constexpr uint32_t capacity = Cap;
-  static constexpr uint32_t max_depth = MaxDepth;
 
   uint32_t base = 0;
   uint32_t cnt = 0;
   uint32_t slot = 0;
   uint32_t wg = 0;
-  uint8_t depth = 0;
   uint16_t sg_info = 0;
-  uint16_t stack[MaxDepth] = {};
   bool active = false;
 
   inline void init(GlobalBuffer const& buf, uint32_t workgroup, uint32_t sg_id) {
@@ -122,7 +119,6 @@ struct SubgroupContext {
       return;
     }
     wg = workgroup & 0xffffu;
-    depth = 0;
     sg_info = detail::pack_sg_info(sg_id);
     slot = (workgroup - buf.wg_base) * buf.sgs_per_wg + sg_id;
     base = slot * Cap;
@@ -151,33 +147,6 @@ struct SubgroupContext {
     record(buf, id, type, kFlatDepth);
   }
 
-  // Stack-based range API (IKET range_push/range_pop semantics).
-  inline void push(GlobalBuffer const& buf, uint16_t id) {
-    if (!active) {
-      return;
-    }
-    if (depth < MaxDepth) {
-      stack[depth] = id;
-    }
-    record(buf, id, kBegin, depth);
-    if (depth < 0xFFu) {
-      ++depth;
-    }
-  }
-
-  inline void pop(GlobalBuffer const& buf) {
-    if (!active || depth == 0) {
-      return;
-    }
-    --depth;
-    const uint16_t id = (depth < MaxDepth) ? stack[depth] : 0;
-    record(buf, id, kEnd, depth);
-  }
-
-  inline void mark(GlobalBuffer const& buf, uint16_t id) {
-    record(buf, id, kMark, depth);
-  }
-
   inline void flush(GlobalBuffer const& buf) {
     if (active) {
       buf.counters[slot] = cnt;
@@ -188,35 +157,48 @@ struct SubgroupContext {
 template <uint32_t Cap, uint32_t MaxDepth = 16>
 class ScopedRange;
 
-// Device-side facade with the same push/pop/mark shape as IKET.
+// Device-side facade with the same push/pop/mark shape as IKET. The range
+// stack lives here, not in SubgroupContext, so legacy flat-macro kernels keep
+// the original lightweight context.
 template <uint32_t Cap, uint32_t MaxDepth = 16>
 class DeviceTracer {
  public:
-  using Context = SubgroupContext<Cap, MaxDepth>;
+  using Context = SubgroupContext<Cap>;
+  static constexpr uint32_t max_depth = MaxDepth;
 
   DeviceTracer(Context& ctx, GlobalBuffer const& buf, sycl::sub_group sg)
       : ctx_(ctx), buf_(buf), leader_(sg.leader()) {}
 
   void range_push(uint16_t id) {
     if constexpr (IKT_TRACE_ENABLED) {
-      if (leader_) {
-        ctx_.push(buf_, id);
+      if (!leader_) {
+        return;
+      }
+      if (depth_ < MaxDepth) {
+        stack_[depth_] = id;
+      }
+      ctx_.record(buf_, id, kBegin, depth_);
+      if (depth_ < 0xFFu) {
+        ++depth_;
       }
     }
   }
 
   void range_pop() {
     if constexpr (IKT_TRACE_ENABLED) {
-      if (leader_) {
-        ctx_.pop(buf_);
+      if (!leader_ || depth_ == 0) {
+        return;
       }
+      --depth_;
+      const uint16_t id = (depth_ < MaxDepth) ? stack_[depth_] : 0;
+      ctx_.record(buf_, id, kEnd, depth_);
     }
   }
 
   void mark(uint16_t id) {
     if constexpr (IKT_TRACE_ENABLED) {
       if (leader_) {
-        ctx_.mark(buf_, id);
+        ctx_.record(buf_, id, kMark, depth_);
       }
     }
   }
@@ -229,6 +211,8 @@ class DeviceTracer {
   Context& ctx_;
   GlobalBuffer buf_;
   bool leader_;
+  uint8_t depth_ = 0;
+  uint16_t stack_[MaxDepth] = {};
 };
 
 template <uint32_t Cap, uint32_t MaxDepth>
@@ -253,15 +237,15 @@ class ScopedRange {
   DeviceTracer<Cap, MaxDepth>* tracer_;
 };
 
-template <uint32_t Cap, uint32_t MaxDepth>
-DeviceTracer(SubgroupContext<Cap, MaxDepth>&, GlobalBuffer const&, sycl::sub_group)
-    -> DeviceTracer<Cap, MaxDepth>;
+template <uint32_t Cap>
+DeviceTracer(SubgroupContext<Cap>&, GlobalBuffer const&, sycl::sub_group)
+    -> DeviceTracer<Cap>;
 
-template <uint32_t Cap, uint32_t MaxDepth>
-DeviceTracer<Cap, MaxDepth> make_device_tracer(SubgroupContext<Cap, MaxDepth>& ctx,
-                                               GlobalBuffer const& buf,
-                                               sycl::sub_group sg) {
-  return DeviceTracer<Cap, MaxDepth>(ctx, buf, sg);
+template <uint32_t Cap>
+DeviceTracer<Cap> make_device_tracer(SubgroupContext<Cap>& ctx,
+                                     GlobalBuffer const& buf,
+                                     sycl::sub_group sg) {
+  return DeviceTracer<Cap>(ctx, buf, sg);
 }
 
 #if IKT_TRACE_ENABLED
