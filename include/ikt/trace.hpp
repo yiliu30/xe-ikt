@@ -399,6 +399,9 @@ class HostSession {
       destroy();
       throw std::runtime_error("ikt: USM allocation failed");
     }
+    // Pre-touch the event buffer so first-write page faults are not charged
+    // to the instrumented kernel (they otherwise appear as a one-tile stall).
+    queue_.memset(d_events_, 0, events * sizeof(Event)).wait_and_throw();
     reset();
   }
 
