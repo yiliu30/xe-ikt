@@ -7,3 +7,6 @@ device="${IKT_DEVICE:-bmg-g31}"
 icpx -O3 -fsycl -fsycl-targets=spir64_gen \
   -Xsycl-target-backend "-device ${device}" \
   -Iinclude examples/regions.cpp -o ikt_regions
+icpx -O3 -fsycl -fsycl-targets=spir64_gen \
+  -Xsycl-target-backend "-device ${device}" \
+  -Iinclude examples/iket_api.cpp -o ikt_iket_api

@@ -81,13 +81,53 @@ python3 scripts/ikt_to_perfetto.py trace.ikttrace \
 
 Open `trace.perfetto.json` in <https://ui.perfetto.dev>.
 
-## Build
+### IKET-aligned device API
+
+`ikt::DeviceTracer` mirrors IKET's `range_push` / `range_pop` / `mark`
+surface while keeping the Xe event backend:
+
+```cpp
+IKT_CTX_TYPE(256) ctx;
+IKT_CTX_INIT(ctx, gbuf, item, sg);
+ikt::DeviceTracer tracer{ctx, gbuf, sg};
+
+tracer.range_push(kLoad);
+// work
+tracer.range_pop();
+
+{
+  IKT_SCOPE(tracer, kCompute);  // RAII: pops automatically
+  // work
+  IKT_TRACER_MARK(tracer, kCompute);
+}
+```
+
+`range_push` / `range_pop` use a true LIFO stack, so nested ranges are
+recorded with depth and can be reconstructed as a call tree. The legacy
+`IKT_BEGIN` / `IKT_END` / `IKT_MARK` macros remain supported and use the
+original flat matching semantics.
+
+To emit an IKET-shaped JSON document as well:
+
+```bash
+python3 scripts/ikt_to_perfetto.py trace.ikttrace \
+  -o trace.perfetto.json --iket-out trace.iket.json
+```
+
+`trace.iket.json` contains `stringTable`, `locationTable`,
+`launches[0].ranges`, and `launches[0].warpLifetimes`, following the shape of
+CUTLASS IKET's `*.trace.json` (not the binary `.pftrace` format).
+
+## Build and check
 
 ```bash
 source /opt/intel/oneapi/compiler/2026.1/env/vars.sh
 ./build.sh
 ./ikt_regions
-python3 scripts/ikt_to_perfetto.py ikt_regions.ikttrace
+./ikt_iket_api
+python3 scripts/ikt_to_perfetto.py ikt_iket_api.ikttrace \
+  -o ikt_iket_api.perfetto.json --iket-out ikt_iket_api.iket.json
+python3 scripts/test_iket_export.py  # GPU-free v2/v3 converter check
 ```
 
 `IKT_DEVICE=bmg-g31` selects the AOT device. CMake is also supported:
@@ -103,7 +143,15 @@ Set `-DIKT_TRACE_ENABLED=0` to compile out the profiling macros.
 
 ## API
 
-### Device macros:
+### Device tracing:
+
+- `ikt::DeviceTracer tracer{ctx, gbuf, sg}`
+- `tracer.range_push(id)` / `tracer.range_pop()`
+- `tracer.mark(id)`
+- `tracer.scoped(id)` / `IKT_SCOPE(tracer, id)`
+- `IKT_RANGE_PUSH/POP`, `IKT_TRACER_MARK` convenience macros
+
+### Legacy device macros:
 
 - `IKT_CTX_TYPE(cap)`
 - `IKT_CTX_INIT(ctx, gbuf, item, sg)`
@@ -128,11 +176,16 @@ Use `wg_base` / `wg_count` to record a bounded subset of workgroups. Use
 The raw `.ikttrace` file contains:
 
 ```text
-magic "IKT02\0\0\0", version, cap, grid,
+magic "IKT03\0\0\0", version 3, cap, grid,
 workgroup base/count, subgroups per workgroup,
 region names, per-slot valid counts,
-16-byte events: {ts, region, type, wg, sg_info}
+16-byte events: {ts, region, type|depth, wg, sg_info}
 ```
+
+The event `type` field packs the event kind in the low byte and the range
+depth in the high byte. `DeviceTracer` events use a real depth; legacy macros
+use `0xFF` to request flat per-region matching. The converter still accepts
+v2 (`IKT02`) traces, which have no depth byte.
 
 `sg_info` packs subgroup id and Xe2 placement:
 
@@ -154,10 +207,15 @@ region names, per-slot valid counts,
   Bound `wg_count` and `cap` for large kernels.
 - **Xe2 placement decoding** uses the BMG SR0.0 layout; other architectures may
   need a different decoder.
+- **The IKET-shaped export is JSON-only.** It does not produce a binary
+  `.pftrace`; use the Perfetto JSON for visualization.
+- **String payloads and explicit role names are not yet part of the API.**
+  Regions are still numeric IDs with a host-side name table.
 
 ## Examples
 
-- [`examples/regions.cpp`](examples/regions.cpp) - standalone multi-region SYCL example
+- [`examples/regions.cpp`](examples/regions.cpp) - legacy flat-macro example
+- [`examples/iket_api.cpp`](examples/iket_api.cpp) - IKET-aligned push/pop, RAII, and mark example
 - [`examples/fmha/`](examples/fmha/) - validated 75,600-token FMHA capture and Perfetto output
 - [`integrations/sycl-tla-fmha.patch`](integrations/sycl-tla-fmha.patch) - SYCL-TLA FMHA integration patch
 - [`examples/source_asm/`](examples/source_asm/) - source-to-ISA viewer (under development)

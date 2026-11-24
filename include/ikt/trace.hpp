@@ -35,11 +35,16 @@ inline constexpr uint16_t kBegin = 0;
 inline constexpr uint16_t kEnd = 1;
 inline constexpr uint16_t kMark = 2;
 
+// Depth sentinel used by the legacy flat IKT_BEGIN/IKT_END macros. Events
+// written through ikt::DeviceTracer carry their real range depth (0..254).
+inline constexpr uint8_t kFlatDepth = 0xFF;
+
 // 16-byte event. The device writer stores this as one 128-bit vector store.
+// The high byte of `type` is the range depth for stack-based push/pop events.
 struct alignas(16) Event {
   uint64_t ts;       // subgroup-clock ticks
   uint16_t id;       // region id
-  uint16_t type;     // kBegin / kEnd / kMark
+  uint16_t type;     // low 8 bits: kBegin/kEnd/kMark; high 8 bits: depth
   uint16_t wg;       // workgroup linear id (low 16 bits)
   uint16_t sg_info;  // packed subgroup + Xe2 placement
 };
@@ -96,6 +101,7 @@ inline uint64_t clock_ticks() {
 template <uint32_t Cap>
 struct SubgroupContext {
   static_assert((Cap & (Cap - 1u)) == 0u, "Cap must be a power of two");
+  static constexpr uint32_t capacity = Cap;
 
   uint32_t base = 0;
   uint32_t cnt = 0;
@@ -119,7 +125,8 @@ struct SubgroupContext {
     cnt = 0;
   }
 
-  inline void record(GlobalBuffer const& buf, uint16_t id, uint16_t type) {
+  inline void record(GlobalBuffer const& buf, uint16_t id, uint16_t type,
+                     uint8_t range_depth) {
     if (!active) {
       return;
     }
@@ -127,11 +134,17 @@ struct SubgroupContext {
     const uint32_t idx = base + (cnt & (Cap - 1u));
     const uint32_t w0 = uint32_t(ts);
     const uint32_t w1 = uint32_t(ts >> 32);
-    const uint32_t w2 = uint32_t(id) | (uint32_t(type) << 16);
+    const uint32_t type_depth = uint32_t(type) | (uint32_t(range_depth) << 8);
+    const uint32_t w2 = uint32_t(id) | (type_depth << 16);
     const uint32_t w3 = wg | (uint32_t(sg_info) << 16);
     auto* dst = reinterpret_cast<sycl::vec<uint32_t, 4>*>(buf.events + idx);
     *dst = sycl::vec<uint32_t, 4>{w0, w1, w2, w3};
     ++cnt;
+  }
+
+  // Legacy flat begin/end/mark: no nesting information is recorded.
+  inline void record_flat(GlobalBuffer const& buf, uint16_t id, uint16_t type) {
+    record(buf, id, type, kFlatDepth);
   }
 
   inline void flush(GlobalBuffer const& buf) {
@@ -140,6 +153,100 @@ struct SubgroupContext {
     }
   }
 };
+
+template <uint32_t Cap, uint32_t MaxDepth = 16>
+class ScopedRange;
+
+// Device-side facade with the same push/pop/mark shape as IKET. The range
+// stack lives here, not in SubgroupContext, so legacy flat-macro kernels keep
+// the original lightweight context.
+template <uint32_t Cap, uint32_t MaxDepth = 16>
+class DeviceTracer {
+ public:
+  using Context = SubgroupContext<Cap>;
+  static constexpr uint32_t max_depth = MaxDepth;
+
+  DeviceTracer(Context& ctx, GlobalBuffer const& buf, sycl::sub_group sg)
+      : ctx_(ctx), buf_(buf), leader_(sg.leader()) {}
+
+  void range_push(uint16_t id) {
+    if constexpr (IKT_TRACE_ENABLED) {
+      if (!leader_) {
+        return;
+      }
+      if (depth_ < MaxDepth) {
+        stack_[depth_] = id;
+      }
+      ctx_.record(buf_, id, kBegin, depth_);
+      if (depth_ < 0xFFu) {
+        ++depth_;
+      }
+    }
+  }
+
+  void range_pop() {
+    if constexpr (IKT_TRACE_ENABLED) {
+      if (!leader_ || depth_ == 0) {
+        return;
+      }
+      --depth_;
+      const uint16_t id = (depth_ < MaxDepth) ? stack_[depth_] : 0;
+      ctx_.record(buf_, id, kEnd, depth_);
+    }
+  }
+
+  void mark(uint16_t id) {
+    if constexpr (IKT_TRACE_ENABLED) {
+      if (leader_) {
+        ctx_.record(buf_, id, kMark, depth_);
+      }
+    }
+  }
+
+  ScopedRange<Cap, MaxDepth> scoped(uint16_t id) {
+    return ScopedRange<Cap, MaxDepth>(*this, id);
+  }
+
+ private:
+  Context& ctx_;
+  GlobalBuffer buf_;
+  bool leader_;
+  uint8_t depth_ = 0;
+  uint16_t stack_[MaxDepth] = {};
+};
+
+template <uint32_t Cap, uint32_t MaxDepth>
+class ScopedRange {
+ public:
+  ScopedRange(DeviceTracer<Cap, MaxDepth>& tracer, uint16_t id) : tracer_(&tracer) {
+    tracer_->range_push(id);
+  }
+  ~ScopedRange() {
+    if (tracer_) {
+      tracer_->range_pop();
+    }
+  }
+  ScopedRange(ScopedRange const&) = delete;
+  ScopedRange& operator=(ScopedRange const&) = delete;
+  ScopedRange(ScopedRange&& other) noexcept : tracer_(other.tracer_) {
+    other.tracer_ = nullptr;
+  }
+  ScopedRange& operator=(ScopedRange&&) = delete;
+
+ private:
+  DeviceTracer<Cap, MaxDepth>* tracer_;
+};
+
+template <uint32_t Cap>
+DeviceTracer(SubgroupContext<Cap>&, GlobalBuffer const&, sycl::sub_group)
+    -> DeviceTracer<Cap>;
+
+template <uint32_t Cap>
+DeviceTracer<Cap> make_device_tracer(SubgroupContext<Cap>& ctx,
+                                     GlobalBuffer const& buf,
+                                     sycl::sub_group sg) {
+  return DeviceTracer<Cap>(ctx, buf, sg);
+}
 
 #if IKT_TRACE_ENABLED
 #define IKT_CTX_TYPE(cap) ::ikt::SubgroupContext<(cap)>
@@ -153,31 +260,31 @@ struct SubgroupContext {
 #define IKT_BEGIN(ctx, gbuf, sg, id)                                            \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
-      (ctx).record((gbuf), uint16_t(id), ::ikt::kBegin);                         \
+      (ctx).record_flat((gbuf), uint16_t(id), ::ikt::kBegin);                    \
     }                                                                              \
   } while (0)
 #define IKT_END(ctx, gbuf, sg, id)                                              \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
-      (ctx).record((gbuf), uint16_t(id), ::ikt::kEnd);                           \
+      (ctx).record_flat((gbuf), uint16_t(id), ::ikt::kEnd);                      \
     }                                                                              \
   } while (0)
 #define IKT_MARK(ctx, gbuf, sg, id)                                             \
   do {                                                                             \
     if ((sg).leader()) {                                                           \
-      (ctx).record((gbuf), uint16_t(id), ::ikt::kMark);                          \
+      (ctx).record_flat((gbuf), uint16_t(id), ::ikt::kMark);                     \
     }                                                                              \
   } while (0)
 #define IKT_BEGIN_IF(ctx, gbuf, sg, id, cond)                                    \
   do {                                                                             \
     if ((sg).leader() && (cond)) {                                                 \
-      (ctx).record((gbuf), uint16_t(id), ::ikt::kBegin);                         \
+      (ctx).record_flat((gbuf), uint16_t(id), ::ikt::kBegin);                    \
     }                                                                              \
   } while (0)
 #define IKT_END_IF(ctx, gbuf, sg, id, cond)                                      \
   do {                                                                             \
     if ((sg).leader() && (cond)) {                                                 \
-      (ctx).record((gbuf), uint16_t(id), ::ikt::kEnd);                           \
+      (ctx).record_flat((gbuf), uint16_t(id), ::ikt::kEnd);                      \
     }                                                                              \
   } while (0)
 #define IKT_FLUSH(ctx, gbuf)                                                    \
@@ -196,6 +303,12 @@ struct SubgroupContext {
 #define IKT_END_IF(ctx, gbuf, sg, id, cond) do { (void)(ctx); } while (0)
 #define IKT_FLUSH(ctx, gbuf) do { (void)(ctx); } while (0)
 #endif
+
+#define IKT_RANGE_PUSH(tracer, id) do { (tracer).range_push(uint16_t(id)); } while (0)
+#define IKT_RANGE_POP(tracer) do { (tracer).range_pop(); } while (0)
+#define IKT_TRACER_MARK(tracer, id) do { (tracer).mark(uint16_t(id)); } while (0)
+#define IKT_SCOPE_IMPL(tracer, id, ctr) auto ikt_scope_##ctr = (tracer).scoped(uint16_t(id))
+#define IKT_SCOPE(tracer, id) IKT_SCOPE_IMPL(tracer, id, __COUNTER__)
 
 namespace detail {
 
@@ -286,6 +399,9 @@ class HostSession {
       destroy();
       throw std::runtime_error("ikt: USM allocation failed");
     }
+    // Pre-touch the event buffer so first-write page faults are not charged
+    // to the instrumented kernel (they otherwise appear as a one-tile stall).
+    queue_.memset(d_events_, 0, events * sizeof(Event)).wait_and_throw();
     reset();
   }
 
@@ -350,9 +466,9 @@ class HostSession {
       return false;
     }
 
-    const char magic[8] = {'I', 'K', 'T', '0', '2', '\0', '\0', '\0'};
+    const char magic[8] = {'I', 'K', 'T', '0', '3', '\0', '\0', '\0'};
     out.write(magic, sizeof(magic));
-    const uint32_t version = 2;
+    const uint32_t version = 3;
     const uint32_t num_regions = uint32_t(region_names_.size());
     const uint32_t event_size = uint32_t(sizeof(Event));
     const uint32_t reserved = 0;
